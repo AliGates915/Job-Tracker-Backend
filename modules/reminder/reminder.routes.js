@@ -4,6 +4,7 @@ import {
   getUpcomingReminders,
   deleteReminder,
   updateReminderStatus,
+  testEmail,
   manualTriggerReminder,
 } from "./reminder.controller.js";
 
@@ -14,5 +15,8 @@ router.get("/upcoming", getUpcomingReminders);
 router.delete("/:id", deleteReminder);
 router.patch("/:id/status", updateReminderStatus);
 router.post("/:reminderId/trigger", manualTriggerReminder);
+
+// backend/modules/reminder/reminder.routes.js
+router.get("/test-email", testEmail);
 
 export default router;

@@ -10,8 +10,18 @@ import reminderRoutes from "./modules/reminder/reminder.routes.js";
 
 const app = express();
 
-app.use(cors());
+// Configure CORS properly
+app.use(cors({
+  origin: 'http://localhost:8080', // Your frontend URL
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
 
 // Routes
 app.use("/api/auth", authRoutes);

@@ -1,3 +1,4 @@
+// backend/modules/document/document.model.js
 import mongoose from "mongoose";
 
 const documentSchema = new mongoose.Schema(
@@ -10,6 +11,7 @@ const documentSchema = new mongoose.Schema(
     applicationId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Application",
+      default: null,
     },
     fileName: {
       type: String,
@@ -19,14 +21,24 @@ const documentSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
-    publicId: String,
+    publicId: {
+      type: String,
+      required: true,
+    },
     fileType: {
       type: String,
       enum: ["resume", "cover_letter"],
       required: true,
     },
+    fileSize: Number,
+    resourceType: String,
+    mimeType: String,
   },
   { timestamps: true }
 );
+
+// Index for efficient queries
+documentSchema.index({ userId: 1, fileType: 1 });
+documentSchema.index({ userId: 1, createdAt: -1 });
 
 export default mongoose.model("Document", documentSchema);

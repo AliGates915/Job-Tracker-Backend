@@ -5,7 +5,8 @@ import {
   updateApplication,
   deleteApplication,
 } from "./application.controller.js";
-import { authenticate } from "../../middlewares/auth.middleware.js"; // you need an auth middleware
+import { authenticate } from "../../middlewares/auth.middleware.js"; 
+
 
 const router = express.Router();
 router.use(authenticate); // protect all routes

@@ -1,13 +1,12 @@
+// backend/modules/document/document.controller.js
 import Document from "./document.model.js";
+import jwt from 'jsonwebtoken';
 import Application from "../application/application.model.js";
-import { v2 as cloudinary } from '../../config/cloudinary.js';
+import cloudinary from '../../config/cloudinary.js';
+import axios from 'axios';
 
 export const uploadDocument = async (req, res) => {
   try {
-    console.log('=== Upload Request Details ===');
-    console.log('Request body:', req.body);
-    console.log('Request file:', req.file);
-    
     const { fileType, userId, applicationId } = req.body;
     
     // Validations
@@ -32,11 +31,51 @@ export const uploadDocument = async (req, res) => {
       });
     }
     
-    // Get file URL from Cloudinary
-    const fileUrl = req.file.path;
-    const publicId = req.file.filename;
+    // Determine resource type based on file mimetype
+    let resourceType = 'auto';
+    let isRaw = false;
     
-    console.log('Cloudinary upload successful:', { fileUrl, publicId });
+    if (req.file.mimetype === 'application/pdf') {
+      resourceType = 'raw'; // Use 'raw' for PDFs
+      isRaw = true;
+    } else if (req.file.mimetype.startsWith('image/')) {
+      resourceType = 'image';
+    }
+    
+    console.log('Uploading to Cloudinary with resource_type:', resourceType);
+    
+    // Upload to Cloudinary
+    const uploadResult = await new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        {
+          folder: `documents/${userId}`,
+          resource_type: resourceType,
+          public_id: `${Date.now()}-${req.file.originalname.split('.')[0]}`,
+          access_mode: 'public', // Force public access
+          type: 'upload',
+          ...(isRaw && { flags: 'attachment' }) // For PDFs
+        },
+        (error, result) => {
+          if (error) reject(error);
+          else resolve(result);
+        }
+      );
+      
+      uploadStream.end(req.file.buffer);
+    });
+    
+    console.log('Cloudinary upload successful:', {
+      url: uploadResult.secure_url,
+      publicId: uploadResult.public_id,
+      resourceType: uploadResult.resource_type
+    });
+    
+    // For raw resources (PDFs), construct a publicly accessible URL
+    let fileUrl = uploadResult.secure_url;
+    if (isRaw && uploadResult.public_id) {
+      // Use the raw URL format that doesn't require authentication
+      fileUrl = `https://res.cloudinary.com/${process.env.CLOUDINARY_CLOUD_NAME}/raw/upload/${uploadResult.public_id}`;
+    }
     
     // Save to database
     const newDocument = await Document.create({
@@ -44,11 +83,12 @@ export const uploadDocument = async (req, res) => {
       applicationId: applicationId || null,
       fileName: req.file.originalname,
       fileUrl: fileUrl,
-      publicId: publicId,
+      publicId: uploadResult.public_id,
       fileType,
+      fileSize: req.file.size,
+      mimeType: req.file.mimetype,
+      resourceType: uploadResult.resource_type,
     });
-    
-    console.log('Document saved to database:', newDocument._id);
     
     // Link document to application if applicationId is provided
     if (applicationId) {
@@ -60,7 +100,6 @@ export const uploadDocument = async (req, res) => {
           application.coverLetterDocumentId = newDocument._id;
         }
         await application.save();
-        console.log(`Document linked to application ${applicationId}`);
       }
     }
     
@@ -71,34 +110,59 @@ export const uploadDocument = async (req, res) => {
     });
     
   } catch (error) {
-    console.error('=== Upload Error Details ===');
-    console.error('Error name:', error.name);
-    console.error('Error message:', error.message);
-    console.error('Error stack:', error.stack);
-    
-    // Handle specific Cloudinary errors
-    if (error.message && error.message.includes('Cloudinary')) {
-      return res.status(500).json({
-        success: false,
-        message: "Cloudinary upload failed",
-        error: error.message,
-      });
-    }
-    
-    // Handle multer errors
-    if (error.message && error.message.includes('file')) {
-      return res.status(400).json({
-        success: false,
-        message: error.message,
-      });
-    }
-    
+    console.error('Upload error:', error);
     res.status(500).json({
       success: false,
       message: "Upload failed",
       error: error.message,
-      details: process.env.NODE_ENV === 'development' ? error.stack : undefined,
     });
+  }
+};
+
+
+export const proxyDocument = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Get token from headers
+    const token = req.headers.authorization?.split(' ')[1];
+    
+    if (!token) {
+      return res.status(401).json({ success: false, message: 'No token provided' });
+    }
+    
+    // Verify token and get user ID
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const userId = decoded.id || decoded.userId;
+    
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'Invalid token' });
+    }
+    
+    const document = await Document.findOne({ _id: id, userId });
+    
+    if (!document) {
+      return res.status(404).json({ success: false, message: 'Document not found' });
+    }
+    
+    // Fetch the file from Cloudinary
+    const response = await axios({
+      method: 'get',
+      url: document.fileUrl,
+      responseType: 'arraybuffer',
+    });
+    
+    // Set headers for inline display
+    res.setHeader('Content-Type', document.mimeType);
+    res.setHeader('Content-Disposition', `inline; filename="${document.fileName}"`);
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    
+    // Send the file data
+    res.send(response.data);
+    
+  } catch (error) {
+    console.error('Proxy error:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch document' });
   }
 };
 
@@ -106,7 +170,13 @@ export const uploadDocument = async (req, res) => {
 export const getDocuments = async (req, res) => {
   try {
     const { userId, applicationId } = req.query;
-    if (!userId) return res.status(400).json({ message: "userId query param required" });
+    
+    if (!userId) {
+      return res.status(400).json({ 
+        success: false,
+        message: "userId query param required" 
+      });
+    }
     
     let query = { userId };
     if (applicationId) {
@@ -114,39 +184,65 @@ export const getDocuments = async (req, res) => {
     }
     
     const docs = await Document.find(query).sort({ createdAt: -1 });
-    res.json(docs);
+    
+    res.status(200).json({
+      success: true,
+      data: docs
+    });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error('Get documents error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: error.message 
+    });
   }
 };
 
 export const deleteDocument = async (req, res) => {
   try {
-    const doc = await Document.findById(req.params.id);
-    if (!doc) return res.status(404).json({ message: "Document not found" });
+    const { id } = req.params;
+    const userId = req.user?.id;
     
-    // Delete from Cloudinary
-    if (doc.publicId) {
-      await cloudinary.uploader.destroy(doc.publicId);
+    const document = await Document.findOne({ _id: id, userId });
+    
+    if (!document) {
+      return res.status(404).json({
+        success: false,
+        message: "Document not found"
+      });
     }
     
-    // Remove reference from application
-    if (doc.applicationId) {
-      const application = await Application.findById(doc.applicationId);
+    // Delete from Cloudinary
+    if (document.publicId) {
+      await cloudinary.uploader.destroy(document.publicId, {
+        resource_type: document.resourceType || 'image'
+      });
+    }
+    
+    // Remove reference from application if linked
+    if (document.applicationId) {
+      const application = await Application.findById(document.applicationId);
       if (application) {
-        if (application.resumeDocumentId?.toString() === doc._id.toString()) {
+        if (document.fileType === "resume") {
           application.resumeDocumentId = null;
-        }
-        if (application.coverLetterDocumentId?.toString() === doc._id.toString()) {
+        } else if (document.fileType === "cover_letter") {
           application.coverLetterDocumentId = null;
         }
         await application.save();
       }
     }
     
-    await Document.findByIdAndDelete(req.params.id);
-    res.json({ message: "Document deleted successfully" });
+    await Document.findByIdAndDelete(id);
+    
+    res.status(200).json({
+      success: true,
+      message: "Document deleted successfully",
+    });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error('Delete error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
   }
 };

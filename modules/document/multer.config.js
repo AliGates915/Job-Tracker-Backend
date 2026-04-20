@@ -1,6 +1,5 @@
 import multer from 'multer';
 import { v2 as cloudinary } from 'cloudinary';
-import cloudinaryStorage from 'multer-storage-cloudinary';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -12,18 +11,8 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// Extract CloudinaryStorage from the package
-const { CloudinaryStorage } = cloudinaryStorage;
-
-// Configure Cloudinary storage
-const storage = new CloudinaryStorage({
-  cloudinary: cloudinary,
-  params: {
-    folder: 'documents',
-    allowed_formats: ['pdf', 'doc', 'docx', 'txt', 'jpg', 'jpeg', 'png'],
-    resource_type: 'auto',
-  },
-});
+// Use memory storage instead of Cloudinary storage
+const storage = multer.memoryStorage();
 
 // File filter function
 const fileFilter = (req, file, cb) => {
@@ -52,5 +41,30 @@ const upload = multer({
     fileSize: 5 * 1024 * 1024, // 5MB limit
   },
 });
+
+// Helper function to upload to Cloudinary
+export const uploadToCloudinary = async (fileBuffer, originalname, mimetype) => {
+  return new Promise((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+      {
+        folder: 'documents',
+        resource_type: 'raw',
+        public_id: `${Date.now()}-${originalname.split('.')[0]}`,
+         access_mode: 'public',
+      },
+      (error, result) => {
+        if (error) reject(error);
+        else resolve(result);
+      }
+    );
+    
+    // Convert buffer to stream
+    const Readable = require('stream').Readable;
+    const readableStream = new Readable();
+    readableStream.push(fileBuffer);
+    readableStream.push(null);
+    readableStream.pipe(uploadStream);
+  });
+};
 
 export default upload;
