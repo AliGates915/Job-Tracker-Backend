@@ -12,7 +12,7 @@ const app = express();
 
 // Configure CORS properly
 app.use(cors({
-  origin: ['http://localhost:8080', 'https://job-tracker-mu-ten.vercel.app'],/ Your frontend URL
+  origin: ['http://localhost:8080', 'https://job-tracker-mu-ten.vercel.app'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
