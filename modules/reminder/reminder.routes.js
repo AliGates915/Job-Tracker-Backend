@@ -6,6 +6,8 @@ import {
   updateReminderStatus,
   testEmail,
   manualTriggerReminder,
+  toggleEmailNotifications,  
+  getEmailNotificationStatus 
 } from "./reminder.controller.js";
 
 const router = express.Router();
@@ -18,5 +20,9 @@ router.post("/:reminderId/trigger", manualTriggerReminder);
 
 // backend/modules/reminder/reminder.routes.js
 router.get("/test-email", testEmail);
+
+// Email notification toggle endpoints
+router.put('/users/:userId/email-notifications', toggleEmailNotifications);
+router.get('/users/:userId/email-notifications', getEmailNotificationStatus);
 
 export default router;

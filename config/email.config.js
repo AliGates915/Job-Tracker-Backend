@@ -3,17 +3,38 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-// Create transporter
+// Verify environment variables
+if (!process.env.EMAIL_USER || !process.env.EMAIL_APP_PASSWORD) {
+  console.error('❌ EMAIL_USER or EMAIL_APP_PASSWORD not set in environment variables');
+  process.exit(1);
+}
+
+console.log(`📧 Email service configured for: ${process.env.EMAIL_USER}`);
+
+// Create transporter with better configuration
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
     user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_APP_PASSWORD, // Use App Password, not regular password
+    pass: process.env.EMAIL_APP_PASSWORD,
   },
+  debug: true, // Enable debug output
+  logger: true, // Log info to console
 });
 
-// Email templates
+// Verify transporter configuration
+transporter.verify((error, success) => {
+  if (error) {
+    console.error('❌ Email transporter verification failed:', error);
+  } else {
+    console.log('✅ Email transporter is ready to send emails');
+  }
+});
+
+// Email templates (keep your existing templates)
 export const sendReminderEmail = async (to, reminder) => {
+  console.log(`📧 Preparing to send email to: ${to}`);
+  
   const emailTemplate = `
     <!DOCTYPE html>
     <html>
@@ -106,7 +127,7 @@ export const sendReminderEmail = async (to, reminder) => {
           <h1>📅 Job Tracker Reminder</h1>
         </div>
         <div class="content">
-          <p>Hello,</p>
+          <p>Hello ${reminder.userId?.fullName || 'there'},</p>
           <p>This is a reminder for your upcoming job application event:</p>
           
           <div class="reminder-card">
@@ -123,13 +144,6 @@ export const sendReminderEmail = async (to, reminder) => {
             </div>
           </div>
           
-          <p>Don't forget to check your job application dashboard for more details!</p>
-          
-          <div style="text-align: center;">
-            <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}" class="button">
-              View Dashboard
-            </a>
-          </div>
         </div>
         <div class="footer">
           <p>This is an automated reminder from Job Tracker App.</p>
@@ -145,14 +159,16 @@ export const sendReminderEmail = async (to, reminder) => {
     to: to,
     subject: `Reminder: ${reminder.title}`,
     html: emailTemplate,
+    // Add text version as fallback
+    text: `Reminder: ${reminder.title}\n\n${reminder.description}\nDate: ${new Date(reminder.reminderDate).toLocaleString()}\nType: ${reminder.type}`,
   };
 
   try {
     const info = await transporter.sendMail(mailOptions);
-    console.log('Email sent: ', info.response);
-    return { success: true, messageId: info.messageId };
+    console.log('✅ Email sent: ', info.messageId, 'to:', to);
+    return { success: true, messageId: info.messageId, response: info.response };
   } catch (error) {
-    console.error('Error sending email: ', error);
+    console.error('❌ Error sending email: ', error);
     return { success: false, error: error.message };
   }
 };

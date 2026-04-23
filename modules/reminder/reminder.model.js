@@ -25,7 +25,17 @@ const reminderSchema = new mongoose.Schema(
       type: String,
       enum: ["interview", "follow-up", "deadline"],
       required: true,
+
     },
+    enabled: {
+      type: Boolean,
+      default: true, // User can enable/disable notifications
+    },
+     emailNotificationsEnabled: {
+    type: Boolean,
+    default: true, // Enable email notifications by default
+  },
+  
     emailSent: {
       type: Boolean,
       default: false,

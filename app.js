@@ -7,12 +7,15 @@ import applicationRoutes from "./modules/application/application.routes.js";
 import documentRoutes from "./modules/document/document.routes.js";
 import reminderRoutes from "./modules/reminder/reminder.routes.js";
 // import analyticsRoutes from "./modules/analytics/analytics.routes.js";
+import notificationRoutes from "./modules/notification/notification.route.js";
+import dashboardRoutes from "./modules/dashboard/dashboard.routes.js";
+
 
 const app = express();
 
 // Configure CORS properly
 app.use(cors({
-  origin: 'http://localhost:8080', // Your frontend URL
+  origin: true, // Reflects request origin
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
@@ -29,6 +32,8 @@ app.use("/api/auth", authRoutes);
 app.use("/api/applications", applicationRoutes);
 app.use("/api/documents", documentRoutes);
 app.use("/api/reminders", reminderRoutes);
+app.use("/api/notifications", notificationRoutes);
+app.use("/api/dashboard", dashboardRoutes);
 // app.use("/api/analytics", analyticsRoutes);
 
 export default app;
