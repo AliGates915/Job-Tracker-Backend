@@ -424,28 +424,6 @@ export const getUpcomingReminders = async (req, res) => {
   }
 };
 
-export const deleteReminder = async (req, res) => {
-  try {
-    const reminder = await Reminder.findById(req.params.id);
-    if (!reminder) {
-      return res.status(404).json({ 
-        success: false,
-        message: "Reminder not found" 
-      });
-    }
-
-    await reminder.deleteOne();
-    res.json({
-      success: true,
-      message: "Reminder deleted successfully",
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
 
 export const updateReminderStatus = async (req, res) => {
   try {
@@ -536,11 +514,36 @@ export const manualTriggerReminder = async (req, res) => {
 
 export const deleteReminderByApplicationId = async (applicationId) => {
   try {
-    await Reminder.deleteMany({ applicationId });
-    console.log(`Reminders deleted for application ${applicationId}`);
-    return true;
+    const result = await Reminder.deleteMany({ applicationId: applicationId });
+    console.log(`Deleted ${result.deletedCount} reminders for application ${applicationId}`);
+    return result;
   } catch (error) {
-    console.error("Error deleting reminder:", error);
+    console.error('Error deleting reminders:', error);
     throw error;
+  }
+};
+
+// Delete a single reminder
+export const deleteReminder = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const reminder = await Reminder.findByIdAndDelete(id);
+    
+    if (!reminder) {
+      return res.status(404).json({
+        success: false,
+        message: "Reminder not found"
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: "Reminder deleted successfully"
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
   }
 };

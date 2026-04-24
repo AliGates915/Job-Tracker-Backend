@@ -23,7 +23,7 @@ const reminderSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ["interview", "follow-up", "deadline"],
+      enum: ["interview", "follow-up", "deadline", 'application'],
       required: true,
 
     },

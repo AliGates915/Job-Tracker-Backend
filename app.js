@@ -6,10 +6,10 @@ import applicationRoutes from "./modules/application/application.routes.js";
 // import userRoutes from "./modules/user/user.routes.js";
 import documentRoutes from "./modules/document/document.routes.js";
 import reminderRoutes from "./modules/reminder/reminder.routes.js";
-// import analyticsRoutes from "./modules/analytics/analytics.routes.js";
+import analyticsRoutes from "./modules/analytics/analytics.routes.js";
 import notificationRoutes from "./modules/notification/notification.route.js";
 import dashboardRoutes from "./modules/dashboard/dashboard.routes.js";
-
+import adminRoutes from "./modules/admin/admin.routes.js";
 
 const app = express();
 
@@ -34,6 +34,7 @@ app.use("/api/documents", documentRoutes);
 app.use("/api/reminders", reminderRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/dashboard", dashboardRoutes);
-// app.use("/api/analytics", analyticsRoutes);
+app.use("/api/analytics", analyticsRoutes);
+app.use("/api/admin", adminRoutes);
 
 export default app;

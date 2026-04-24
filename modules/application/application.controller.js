@@ -1,5 +1,6 @@
 import Application from "./application.model.js";
 import Document from "../document/document.model.js";
+import Reminder from "../reminder/reminder.model.js";
 import { createReminderFromApplication } from "../reminder/reminder.controller.js";
 
 export const createApplication = async (req, res) => {
@@ -102,11 +103,10 @@ export const updateApplication = async (req, res) => {
 };
 
 
-// Get all applications for a user
 export const getApplications = async (req, res) => {
   try {
-    // Get userId from the authenticated user (from token)
-    const userId = req.user.id; // or req.user.userId depending on your token structure
+    // Fix: Use req.user.userId instead of req.user.id
+    const userId = req.user.userId || req.user._id || req.user.id;
     
     if (!userId) {
       return res.status(400).json({
@@ -155,18 +155,31 @@ export const getApplication = async (req, res) => {
     });
   }
 };
-
+// Add this function to delete reminders by application ID
+export const deleteReminderByApplicationId = async (applicationId) => {
+  try {
+    const result = await Reminder.deleteMany({ applicationId: applicationId });
+    console.log(`Deleted ${result.deletedCount} reminders for application ${applicationId}`);
+    return result;
+  } catch (error) {
+    console.error('Error deleting reminders:', error);
+    throw error;
+  }
+};
 
 // Delete application
 export const deleteApplication = async (req, res) => {
   try {
     const { id } = req.params;
-    const application = await Application.findById(id);
+    const userId = req.user.userId || req.user._id || req.user.id;
+    
+    // Find application and verify ownership
+    const application = await Application.findOne({ _id: id, userId });
     
     if (!application) {
       return res.status(404).json({
         success: false,
-        message: "Application not found",
+        message: "Application not found or you don't have permission to delete it",
       });
     }
     
@@ -181,6 +194,7 @@ export const deleteApplication = async (req, res) => {
       message: "Application deleted successfully",
     });
   } catch (error) {
+    console.error('Delete application error:', error);
     res.status(500).json({
       success: false,
       message: error.message,
