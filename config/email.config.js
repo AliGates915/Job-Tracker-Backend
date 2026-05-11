@@ -290,4 +290,6 @@ export const sendDailyDigest = async (to, reminders) => {
   }
 };
 
+
+
 export default transporter;
