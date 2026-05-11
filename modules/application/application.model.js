@@ -15,6 +15,10 @@ const applicationSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    resumeDocumentId :{
+      type: String,
+      default: null,
+    },
     jobLink: String,
     appliedDate: {
       type: Date,
@@ -27,14 +31,6 @@ const applicationSchema = new mongoose.Schema(
       default: "Applied",
     },
     notes: String,
-    resumeDocumentId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Document",
-    },
-    coverLetterDocumentId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Document",
-    },
     reminderDate: {
       type: Date,
       validate: {
