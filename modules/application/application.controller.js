@@ -5,7 +5,13 @@ import { createReminderFromApplication } from "../reminder/reminder.controller.j
 
 export const createApplication = async (req, res) => {
   try {
-    const { userId, resumeDocumentId, coverLetterDocumentId, ...applicationData } = req.body;
+    // Get userId from the authenticated user (from token)
+    const userId = req.user.userId; 
+    console.log("User ID", req.user.userId);
+    console.log("User ", userId);
+    
+    // The rest of the data comes from request body
+    const applicationData = req.body;
     
     // Validate reminder date for applicable statuses
     const statusesThatNeedReminder = ["Screening", "Interview", "Offer", "Applied"];
@@ -13,46 +19,42 @@ export const createApplication = async (req, res) => {
       if (!applicationData.reminderDate) {
         return res.status(400).json({
           success: false,
-          message: "Reminder date is required for Screening, Interview, and Offer statuses",
+          message: "Reminder date is required for Screening, Interview, Offer, and Applied statuses",
         });
       }
     }
     
-    // Create application with document references
+    // Ensure reminderDate is a proper Date object
+    if (applicationData.reminderDate) {
+      applicationData.reminderDate = new Date(applicationData.reminderDate);
+    }
+    
+    // Create application with userId from token
     const application = await Application.create({
       userId,
       ...applicationData,
-      resumeDocumentId: resumeDocumentId || null,
-      coverLetterDocumentId: coverLetterDocumentId || null,
     });
     
-    // Update documents with application reference if they exist
-    if (resumeDocumentId) {
-      await Document.findByIdAndUpdate(resumeDocumentId, { 
-        applicationId: application._id 
+    // Create reminder in reminders collection if status requires it
+    if (applicationData.reminderDate && statusesThatNeedReminder.includes(applicationData.status)) {
+      const reminder = await Reminder.create({
+        applicationId: application._id,
+        userId: userId,
+        reminderDate: applicationData.reminderDate,
+        type: "follow-up", // or "interview" based on status
+        title: `Reminder: ${applicationData.position} at ${applicationData.companyName}`,
+        description: `Follow up on ${applicationData.position} application at ${applicationData.companyName}. Current status: ${applicationData.status}`,
+        enabled: true,
+        emailNotificationsEnabled: true,
+        emailSent: false,
+        status: "pending",
       });
+      console.log('Reminder scheduled for:', reminder.reminderDate);
     }
-    
-    if (coverLetterDocumentId) {
-      await Document.findByIdAndUpdate(coverLetterDocumentId, { 
-        applicationId: application._id 
-      });
-    }
-    
-    // Create reminder if status requires it and reminder date is provided
-    if (application.reminderDate && statusesThatNeedReminder.includes(application.status)) {
-      const reminder = await createReminderFromApplication(application, userId);
-      console.log('Reminder created:', reminder);
-    }
-    
-    // Populate document references if they exist
-    const populatedApplication = await Application.findById(application._id)
-      .populate('resumeDocumentId')
-      .populate('coverLetterDocumentId');
     
     res.status(201).json({
       success: true,
-      data: populatedApplication,
+      data: application,
     });
   } catch (error) {
     console.error('Create application error:', error);
@@ -62,6 +64,7 @@ export const createApplication = async (req, res) => {
     });
   }
 };
+
 
 export const updateApplication = async (req, res) => {
   try {
@@ -115,7 +118,7 @@ export const getApplications = async (req, res) => {
       });
     }
     
-    const applications = await Application.find({ userId });
+    const applications = await Application.find({ userId }).sort({ createdAt: -1 });
     
     res.status(200).json({
       success: true,
@@ -133,9 +136,7 @@ export const getApplications = async (req, res) => {
 export const getApplication = async (req, res) => {
   try {
     const { id } = req.params;
-    const application = await Application.findById(id)
-      .populate('resumeDocumentId')
-      .populate('coverLetterDocumentId');
+    const application = await Application.findById(id);
     
     if (!application) {
       return res.status(404).json({
@@ -214,8 +215,6 @@ export const getApplicationsByStatus = async (req, res) => {
     }
     
     const applications = await Application.find({ userId, status })
-      .populate('resumeDocumentId')
-      .populate('coverLetterDocumentId')
       .sort({ appliedDate: -1 });
     
     res.json({
