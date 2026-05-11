@@ -2,9 +2,9 @@
 import Reminder from "./reminder.model.js";
 import Application from "../application/application.model.js";
 import User from "../auth/auth.model.js";
-import { sendReminderEmail, sendDailyDigest } from "../../config/email.config.js";
+import { sendReminderEmail } from "../../config/email.config.js";
 import cron from 'node-cron';
-import {createNotification} from '../notification/notification.controller.js'
+import { createNotification } from '../notification/notification.controller.js'
 
 // Helper function to get reminder type from status
 const getReminderType = (status) => {
@@ -22,55 +22,16 @@ const getReminderType = (status) => {
   }
 };
 
-// Helper function to check if user has email notifications enabled
-const isEmailEnabledForUser = async (userId) => {
-  try {
-    const user = await User.findById(userId);
-    // Check if user exists and has email notifications enabled
-    // Assuming the User model has an 'emailNotificationsEnabled' field
-    // If not, you'll need to add it to your User schema
-    return user && user.emailNotificationsEnabled === true;
-  } catch (error) {
-    console.error(`❌ Error checking user email status: ${error.message}`);
-    return false;
-  }
-};
-
-// UPDATED: Function to send email immediately (only if user has notifications enabled)
+// Send email immediately (with validation)
 const sendEmailImmediately = async (reminder, userEmail, userId) => {
   try {
-    // FIRST: Check if user has email notifications enabled
-    const isEnabled = await isEmailEnabledForUser(userId);
+    console.log(`📧 Attempting to send email immediately to: ${userEmail}`);
+    console.log(`📅 Reminder date: ${reminder.reminderDate}`);
+    console.log(`🕐 Current time: ${new Date().toISOString()}`);
     
-    if (!isEnabled) {
-      console.log(`⚠️ Email notifications disabled for user ${userId}. Skipping email send.`);
-      // Still create notification but mark email as not needed
-      const notificationTitle = `Reminder: ${reminder.title}`;
-      const notificationMessage = reminder.description || "You have an upcoming reminder";
-      
-      await createNotification(
-        userId,
-        notificationTitle,
-        notificationMessage,
-        reminder.type,
-        reminder.applicationId,
-        reminder.reminderDate
-      );
-      
-      // Mark as "skipped" or keep as pending for later? Let's mark as sent since email is disabled
-      reminder.emailSent = true; // Mark as sent to avoid future attempts
-      reminder.emailSentAt = new Date();
-      reminder.status = "sent";
-      await reminder.save();
-      
-      return { success: true, skipped: true, message: "Email notifications disabled for user" };
-    }
-    
-    // User has email enabled, proceed with sending
-    console.log(`📧 Attempting to send email to: ${userEmail}`);
     const result = await sendReminderEmail(userEmail, reminder);
     
-    // ALSO CREATE NOTIFICATION (separate from email)
+    // Create notification regardless of email success
     const notificationTitle = `Reminder: ${reminder.title}`;
     const notificationMessage = reminder.description || "You have an upcoming reminder";
     
@@ -105,7 +66,18 @@ const sendEmailImmediately = async (reminder, userEmail, userId) => {
   }
 };
 
-// UPDATED: Create reminder and send email immediately (respects user's enabled setting)
+// Check if reminder should be sent immediately
+const shouldSendImmediately = (reminderDate) => {
+  const now = new Date();
+  const reminderTime = new Date(reminderDate);
+  const timeDiff = reminderTime.getTime() - now.getTime();
+  
+  // Send immediately if reminder time is within the last 5 minutes OR next 5 seconds
+  console.log(`⏰ Time difference: ${timeDiff}ms (${timeDiff/1000} seconds)`);
+  return timeDiff <= 5000; // Within 5 seconds in the future OR any time in the past
+};
+
+// CREATE REMINDER FROM APPLICATION - FIXED
 export const createReminderFromApplication = async (application, userId) => {
   try {
     console.log('📝 Creating reminder for application:', {
@@ -115,8 +87,8 @@ export const createReminderFromApplication = async (application, userId) => {
       userId: userId
     });
     
-    // Only block "Rejected" status
-    if (["Rejected"].includes(application.status)) {
+    // Skip for Rejected status
+    if (application.status === "Rejected") {
       console.log('❌ No reminder needed for status: Rejected');
       return null;
     }
@@ -127,7 +99,7 @@ export const createReminderFromApplication = async (application, userId) => {
       return null;
     }
 
-    // Get user email from user table
+    // Get user details
     const user = await User.findById(userId);
     if (!user || !user.email) {
       console.error('❌ User not found or email missing:', userId);
@@ -135,9 +107,8 @@ export const createReminderFromApplication = async (application, userId) => {
     }
     
     console.log(`👤 Found user: ${user.fullName} with email: ${user.email}`);
-    console.log(`📧 Email notifications enabled: ${user.emailNotificationsEnabled}`);
 
-    // Check if reminder already exists for this application
+    // Check if reminder already exists
     let reminder = await Reminder.findOne({
       applicationId: application._id,
     });
@@ -153,8 +124,11 @@ export const createReminderFromApplication = async (application, userId) => {
       await reminder.save();
       console.log('✅ Reminder updated successfully');
       
-      // Send email for updated reminder (checks enabled status internally)
-      await sendEmailImmediately(reminder, user.email, userId);
+      // Check if should send immediately
+      if (shouldSendImmediately(reminder.reminderDate)) {
+        console.log('⏰ Reminder time is now or in the past, sending immediately...');
+        await sendEmailImmediately(reminder, user.email, userId);
+      }
       return reminder;
     }
 
@@ -175,8 +149,21 @@ export const createReminderFromApplication = async (application, userId) => {
     reminder = await Reminder.create(reminderData);
     console.log('✅ Reminder created successfully:', reminder._id);
     
-    // Send email immediately for the new reminder (checks enabled status internally)
-    await sendEmailImmediately(reminder, user.email, userId);
+    // ALWAYS check if should send immediately
+    const now = new Date();
+    const reminderTime = new Date(reminder.reminderDate);
+    const timeDiff = reminderTime.getTime() - now.getTime();
+    
+    console.log(`⏰ Current time: ${now.toISOString()}`);
+    console.log(`⏰ Reminder time: ${reminderTime.toISOString()}`);
+    console.log(`⏰ Time difference: ${timeDiff}ms (${timeDiff/1000} seconds)`);
+    
+    if (timeDiff <= 60000) { // Within 1 minute (past or future)
+      console.log('⏰ Reminder is due or almost due, sending immediately...');
+      await sendEmailImmediately(reminder, user.email, userId);
+    } else {
+      console.log(`⏰ Reminder scheduled for future: ${reminder.reminderDate}`);
+    }
     
     return reminder;
   } catch (error) {
@@ -185,55 +172,62 @@ export const createReminderFromApplication = async (application, userId) => {
   }
 };
 
-// UPDATED: Cron job to send reminder emails (respects user's enabled setting)
+
+// FIXED: Cron job to send reminder emails (checks every minute for more precision)
 export const startReminderScheduler = () => {
-  // Run every 15 minutes for more frequent checking
-  cron.schedule('*/15 * * * *', async () => {
-    console.log('🕐 Checking for pending reminders...', new Date().toISOString());
+  // Run every 30 seconds for more precise checking
+  cron.schedule('*/30 * * * * *', async () => {
+    console.log('🕐 Checking for due reminders...', new Date().toISOString());
     
     try {
       const now = new Date();
-      const fifteenMinutesFromNow = new Date(now.getTime() + 15 * 60 * 1000);
+      // Look for reminders that are due (within the last 5 minutes or next 30 seconds)
+      const fiveMinutesAgo = new Date(now.getTime() - 5 * 60 * 1000);
+      const thirtySecondsFromNow = new Date(now.getTime() + 30 * 1000);
       
-      // Find reminders that need to be sent (upcoming in next 15 minutes)
+      // Find reminders that are due and not sent
       const reminders = await Reminder.find({
-        reminderDate: { $gte: now, $lte: fifteenMinutesFromNow },
+        reminderDate: { $gte: fiveMinutesAgo, $lte: thirtySecondsFromNow },
         emailSent: false,
         status: "pending",
         retryCount: { $lt: 3 },
       });
       
-      console.log(`📧 Found ${reminders.length} reminders to process`);
+      console.log(`📧 Found ${reminders.length} reminders to process at ${now.toISOString()}`);
+      
+      if (reminders.length > 0) {
+        console.log(`📋 Reminder IDs: ${reminders.map(r => r._id).join(', ')}`);
+      }
       
       for (const reminder of reminders) {
-        // Get user email from user table
+        // Get user details
         const user = await User.findById(reminder.userId);
         
         if (user && user.email) {
-          // Check if user has email notifications enabled
-          if (user.emailNotificationsEnabled === true) {
-            console.log(`📧 Sending reminder to: ${user.email} for: ${reminder.title}`);
-            const result = await sendReminderEmail(user.email, reminder);
-            
-            if (result.success) {
-              reminder.emailSent = true;
-              reminder.emailSentAt = new Date();
-              reminder.status = "sent";
-              console.log(`✅ Email sent for reminder: ${reminder.title}`);
-            } else {
-              reminder.retryCount += 1;
-              reminder.status = reminder.retryCount >= 3 ? "failed" : "pending";
-              console.log(`❌ Failed to send email for reminder: ${reminder.title}. Error: ${result.error}`);
-            }
-          } else {
-            console.log(`⚠️ Email notifications disabled for user ${user._id}. Skipping scheduled email for reminder: ${reminder.title}`);
-            // Mark as sent to avoid future attempts
+          console.log(`📧 Processing reminder for: ${user.email} - ${reminder.title}`);
+          console.log(`⏰ Reminder time: ${reminder.reminderDate}`);
+          console.log(`⏰ Current time: ${now.toISOString()}`);
+          
+          // Check if email is already sent
+          if (reminder.emailSent) {
+            console.log(`⚠️ Reminder already sent, skipping...`);
+            continue;
+          }
+          
+          const result = await sendReminderEmail(user.email, reminder);
+          
+          if (result.success) {
             reminder.emailSent = true;
             reminder.emailSentAt = new Date();
             reminder.status = "sent";
+            console.log(`✅ Email sent for reminder: ${reminder.title}`);
+          } else {
+            reminder.retryCount += 1;
+            reminder.status = reminder.retryCount >= 3 ? "failed" : "pending";
+            console.log(`❌ Failed to send email for reminder: ${reminder.title}. Error: ${result.error}`);
           }
           
-          // Always create notification regardless of email setting
+          // Always create notification
           const notificationTitle = `Reminder: ${reminder.title}`;
           const notificationMessage = reminder.description || "You have an upcoming reminder";
           
@@ -258,80 +252,235 @@ export const startReminderScheduler = () => {
     }
   });
   
-  console.log('✅ Reminder scheduler started (runs every 15 minutes)');
+  console.log('✅ Reminder scheduler started (runs every 30 seconds)');
 };
 
-// NEW: Endpoint to toggle user email notifications
+
+// Also add immediate check when server starts
+export const checkOverdueRemindersOnStartup = async () => {
+  console.log('🔍 Checking for overdue reminders on startup...');
+  console.log(`🕐 Current server time: ${new Date().toISOString()}`);
+  
+  try {
+    const now = new Date();
+    // Look for reminders that are overdue (any time in the past up to 24 hours)
+    const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    
+    const overdueReminders = await Reminder.find({
+      reminderDate: { $gte: oneDayAgo, $lte: now },
+      emailSent: false,
+      status: "pending",
+      retryCount: { $lt: 3 },
+    });
+    
+    console.log(`📧 Found ${overdueReminders.length} overdue reminders from the last 24 hours`);
+    
+    if (overdueReminders.length > 0) {
+      console.log(`📋 Overdue reminder IDs: ${overdueReminders.map(r => r._id).join(', ')}`);
+    }
+    
+    for (const reminder of overdueReminders) {
+      const user = await User.findById(reminder.userId);
+      if (user && user.email) {
+        console.log(`📧 Sending overdue reminder to: ${user.email}`);
+        console.log(`⏰ Original reminder time: ${reminder.reminderDate}`);
+        await sendEmailImmediately(reminder, user.email, reminder.userId);
+      } else {
+        console.error(`❌ Cannot send overdue reminder - User not found: ${reminder.userId}`);
+      }
+    }
+    
+    if (overdueReminders.length === 0) {
+      console.log('✅ No overdue reminders found');
+    }
+  } catch (error) {
+    console.error('Error checking overdue reminders:', error);
+  }
+};
+
+// Add this to your routes for testing
+export const forceCheckReminders = async (req, res) => {
+  try {
+    console.log('🔧 Manually triggering reminder check...');
+    
+    const now = new Date();
+    const fiveMinutesAgo = new Date(now.getTime() - 5 * 60 * 1000);
+    const thirtySecondsFromNow = new Date(now.getTime() + 30 * 1000);
+    
+    const reminders = await Reminder.find({
+      reminderDate: { $gte: fiveMinutesAgo, $lte: thirtySecondsFromNow },
+      emailSent: false,
+      status: "pending",
+    });
+    
+    let sentCount = 0;
+    
+    for (const reminder of reminders) {
+      const user = await User.findById(reminder.userId);
+      if (user && user.email) {
+        const result = await sendReminderEmail(user.email, reminder);
+        if (result.success) {
+          reminder.emailSent = true;
+          reminder.emailSentAt = new Date();
+          reminder.status = "sent";
+          await reminder.save();
+          sentCount++;
+        }
+      }
+    }
+    
+    res.json({
+      success: true,
+      message: `Processed ${reminders.length} reminders, sent ${sentCount} emails`,
+      data: { totalReminders: reminders.length, sent: sentCount }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Other existing functions remain the same...
+export const getUserReminders = async (req, res) => {
+  try {
+    const { userId } = req.query;
+    if (!userId) {
+      return res.status(400).json({ 
+        success: false,
+        message: "userId is required" 
+      });
+    }
+
+    const reminders = await Reminder.find({ userId })
+      .populate('applicationId', 'companyName position status')
+      .sort({ reminderDate: 1, createdAt: 1 });
+
+    res.json({
+      success: true,
+      data: reminders,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+export const deleteReminderByApplicationId = async (applicationId) => {
+  try {
+    const result = await Reminder.deleteMany({ applicationId: applicationId });
+    console.log(`Deleted ${result.deletedCount} reminders for application ${applicationId}`);
+    return result;
+  } catch (error) {
+    console.error('Error deleting reminders:', error);
+    throw error;
+  }
+};
+
+export const deleteReminder = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const reminder = await Reminder.findByIdAndDelete(id);
+    
+    if (!reminder) {
+      return res.status(404).json({
+        success: false,
+        message: "Reminder not found"
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: "Reminder deleted successfully"
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+// controllers/reminderController.js or userController.js
 export const toggleEmailNotifications = async (req, res) => {
   try {
     const { userId } = req.params;
     const { enabled } = req.body;
-    
-    if (!userId) {
+
+    // Validate input
+    if (typeof enabled !== 'boolean') {
       return res.status(400).json({
         success: false,
-        message: "userId is required"
+        message: 'Enabled must be a boolean value'
       });
     }
-    
-    const user = await User.findById(userId);
+
+    // Update user's email notification preference
+    const user = await User.findByIdAndUpdate(
+      userId,
+      { emailNotificationsEnabled: enabled },
+      { new: true, runValidators: true }
+    ).select('-password');
+
     if (!user) {
       return res.status(404).json({
         success: false,
-        message: "User not found"
+        message: 'User not found'
       });
     }
-    
-    // Update email notifications setting
-    user.emailNotificationsEnabled = enabled;
-    await user.save();
-    
-    res.json({
+
+    // Optional: Update all existing reminders for this user
+    // This is useful if you want existing reminders to respect the new setting
+    await Reminder.updateMany(
+      { userId: userId },
+      { emailNotificationsEnabled: enabled }
+    );
+
+    res.status(200).json({
       success: true,
       message: `Email notifications ${enabled ? 'enabled' : 'disabled'} successfully`,
-      data: { emailNotificationsEnabled: user.emailNotificationsEnabled }
+      data: {
+        emailNotificationsEnabled: user.emailNotificationsEnabled
+      }
     });
   } catch (error) {
+    console.error('Error toggling email notifications:', error);
     res.status(500).json({
       success: false,
-      message: error.message
+      message: 'Server error while updating email notification settings'
     });
   }
 };
 
-// NEW: Get user's email notification status
+// Get user's email notification status
 export const getEmailNotificationStatus = async (req, res) => {
   try {
     const { userId } = req.params;
-    
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        message: "userId is required"
-      });
-    }
-    
+
     const user = await User.findById(userId).select('emailNotificationsEnabled');
+
     if (!user) {
       return res.status(404).json({
         success: false,
-        message: "User not found"
+        message: 'User not found'
       });
     }
-    
-    res.json({
+
+    res.status(200).json({
       success: true,
       data: {
-        emailNotificationsEnabled: user.emailNotificationsEnabled ?? true // Default to true if not set
+        emailNotificationsEnabled: user.emailNotificationsEnabled
       }
     });
   } catch (error) {
+    console.error('Error fetching email notification status:', error);
     res.status(500).json({
       success: false,
-      message: error.message
+      message: 'Server error while fetching email notification settings'
     });
   }
 };
+
 
 // The rest of your existing functions remain the same...
 export const testEmail = async (req, res) => {
@@ -364,31 +513,6 @@ export const testEmail = async (req, res) => {
   }
 };
 
-export const getUserReminders = async (req, res) => {
-  try {
-    const { userId } = req.query;
-    if (!userId) {
-      return res.status(400).json({ 
-        success: false,
-        message: "userId is required" 
-      });
-    }
-
-    const reminders = await Reminder.find({ userId })
-      .populate('applicationId', 'companyName position status')
-      .sort({ reminderDate: 1, createdAt: 1 });
-
-    res.json({
-      success: true,
-      data: reminders,
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
 
 export const getUpcomingReminders = async (req, res) => {
   try {
@@ -512,38 +636,4 @@ export const manualTriggerReminder = async (req, res) => {
   }
 };
 
-export const deleteReminderByApplicationId = async (applicationId) => {
-  try {
-    const result = await Reminder.deleteMany({ applicationId: applicationId });
-    console.log(`Deleted ${result.deletedCount} reminders for application ${applicationId}`);
-    return result;
-  } catch (error) {
-    console.error('Error deleting reminders:', error);
-    throw error;
-  }
-};
 
-// Delete a single reminder
-export const deleteReminder = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const reminder = await Reminder.findByIdAndDelete(id);
-    
-    if (!reminder) {
-      return res.status(404).json({
-        success: false,
-        message: "Reminder not found"
-      });
-    }
-    
-    res.json({
-      success: true,
-      message: "Reminder deleted successfully"
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-};
