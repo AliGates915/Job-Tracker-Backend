@@ -2,9 +2,13 @@ import Application from "../application/application.model.js";
 
 export const getAnalytics = async (req, res) => {
   try {
-    const totalApplications = await Application.countDocuments();
+    const userId = req.user.userId || req.user._id || req.user.id;
+    const totalApplications = await Application.countDocuments({ user: userId });
 
     const statusBreakdown = await Application.aggregate([
+      {
+        $match: { user: userId },
+      },
       {
         $group: {
           _id: "$status",
@@ -14,6 +18,9 @@ export const getAnalytics = async (req, res) => {
     ]);
 
     const monthlyApplications = await Application.aggregate([
+      {
+        $match: { user: userId },
+      },
       {
         $group: {
           _id: { $month: "$appliedDate" },
