@@ -7,7 +7,7 @@ export const getAnalytics = async (req, res) => {
 
     const statusBreakdown = await Application.aggregate([
       {
-        $match: { user: userId },
+           $match: { userId },
       },
       {
         $group: {
@@ -19,7 +19,7 @@ export const getAnalytics = async (req, res) => {
 
     const monthlyApplications = await Application.aggregate([
       {
-        $match: { user: userId },
+           $match: { userId },
       },
       {
         $group: {
